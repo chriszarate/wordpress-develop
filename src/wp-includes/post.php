@@ -657,7 +657,7 @@ function create_initial_post_types() {
 		)
 	);
 
-	if ( get_option( 'enable_real_time_collaboration' ) ) {
+	if ( get_option( 'enable_real_time_collaboration', 1 ) ) {
 		register_post_type(
 			'wp_sync_storage',
 			array(
@@ -8667,7 +8667,7 @@ function wp_create_initial_post_meta() {
 		)
 	);
 
-	if ( get_option( 'enable_real_time_collaboration' ) ) {
+	if ( get_option( 'enable_real_time_collaboration', 1 ) ) {
 		register_meta(
 			'post',
 			'_crdt_document',
