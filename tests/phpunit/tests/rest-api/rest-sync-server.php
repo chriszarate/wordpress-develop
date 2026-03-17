@@ -757,4 +757,100 @@ class WP_Test_REST_Sync_Server extends WP_Test_REST_Controller_Testcase {
 		// Room 2 should have no updates.
 		$this->assertEmpty( $data['rooms'][1]['updates'] );
 	}
+
+	/*
+	 * Payload size limit tests.
+	 */
+
+	public function test_sync_rejects_too_many_rooms() {
+		wp_set_current_user( self::$editor_id );
+
+		$rooms = array();
+		for ( $i = 0; $i < WP_HTTP_Polling_Sync_Server::MAX_ROOMS_PER_REQUEST + 1; $i++ ) {
+			$post_id = self::factory()->post->create( array( 'post_author' => self::$editor_id ) );
+			$rooms[] = $this->build_room( 'postType/post:' . $post_id );
+		}
+
+		$response = $this->dispatch_sync( $rooms );
+
+		$this->assertSame( 400, $response->get_status() );
+	}
+
+	public function test_sync_rejects_oversized_update_data() {
+		wp_set_current_user( self::$editor_id );
+
+		$oversized_data = str_repeat( 'a', WP_HTTP_Polling_Sync_Server::MAX_UPDATE_DATA_SIZE + 1 );
+		$update         = array(
+			'type' => 'update',
+			'data' => $oversized_data,
+		);
+
+		$response = $this->dispatch_sync(
+			array(
+				$this->build_room( $this->get_post_room(), 1, 0, array( 'user' => 'test' ), array( $update ) ),
+			)
+		);
+
+		$this->assertSame( 400, $response->get_status() );
+	}
+
+	public function test_sync_rejects_oversized_request_body() {
+		wp_set_current_user( self::$editor_id );
+
+		// Build a valid JSON body that exceeds the total body size limit.
+		// The route-level validate_callback checks body size before schema
+		// validation, so the oversized data field won't trigger maxLength first.
+		$padding = str_repeat( 'a', WP_HTTP_Polling_Sync_Server::MAX_BODY_SIZE );
+		$body    = wp_json_encode(
+			array(
+				'rooms' => array(
+					array(
+						'after'     => 0,
+						'awareness' => array( 'user' => 'test' ),
+						'client_id' => 1,
+						'room'      => $this->get_post_room(),
+						'updates'   => array(
+							array(
+								'type' => 'update',
+								'data' => $padding,
+							),
+						),
+					),
+				),
+			)
+		);
+
+		$request = new WP_REST_Request( 'POST', '/wp-sync/v1/updates' );
+		$request->set_header( 'Content-Type', 'application/json' );
+		$request->set_body( $body );
+
+		$response = rest_get_server()->dispatch( $request );
+
+		$this->assertSame( 413, $response->get_status() );
+	}
+
+	public function test_sync_accepts_requests_within_limits() {
+		wp_set_current_user( self::$editor_id );
+
+		$updates = array();
+		for ( $i = 0; $i < 5; $i++ ) {
+			$updates[] = array(
+				'type' => 'update',
+				'data' => base64_encode( "update-$i" ),
+			);
+		}
+
+		$awareness = array(
+			'user'   => 'test',
+			'cursor' => 42,
+		);
+
+		$response = $this->dispatch_sync(
+			array(
+				$this->build_room( $this->get_post_room(), 1, 0, $awareness, $updates ),
+			)
+		);
+
+		$this->assertSame( 200, $response->get_status() );
+	}
 }
